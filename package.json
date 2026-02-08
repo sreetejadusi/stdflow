@@ -1,0 +1,300 @@
+{
+  "name": "visor",
+  "displayName": "Visor",
+  "version": "1.6.1",
+  "publisher": "sidhantsriv",
+  "description": "Makes a flowchart on the side for your code for better visualization. Compatible with VS Code, Cursor, and Windsurf editors.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sidhant-sriv/visor.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "icon": "media/icon.png",
+  "categories": [
+    "Visualization",
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "visor-container",
+          "title": "Visor",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "visor-container": [
+        {
+          "id": "visor.flowchartView",
+          "name": "Flowchart",
+          "type": "webview",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "visor.generateFlowchart",
+        "title": "Generate Flowchart"
+      },
+      {
+        "command": "visor.openFlowchartInPanel",
+        "title": "Open Flowchart in New Window",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "visor.openFlowchartToSide",
+        "title": "Open Flowchart to the Side",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "visor.openFlowchartInNewColumn",
+        "title": "Open Flowchart in New Column",
+        "icon": "$(split-vertical)"
+      },
+      {
+        "command": "visor.maximizeFlowchartPanel",
+        "title": "Maximize Flowchart Panel",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "visor.llm.enableLabels",
+        "title": "Visor: Enable LLM Labels",
+        "icon": "$(extensions-install)"
+      },
+      {
+        "command": "visor.llm.changeModel",
+        "title": "Visor: Change LLM Model",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "visor.llm.resetCache",
+        "title": "Visor: Reset LLM Cache",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "visor.generateFlowchart",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "navigation"
+        },
+        {
+          "command": "visor.openFlowchartInPanel",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "visor.openFlowchartInPanel",
+          "when": "view == visor.flowchartView",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "visor.openFlowchartInPanel",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "visor.openFlowchartToSide",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "visor.openFlowchartInNewColumn",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "visor.maximizeFlowchartPanel",
+          "when": "editorTextFocus"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Visor",
+      "properties": {
+        "visor.nodeReadability.theme": {
+          "type": "string",
+          "enum": [
+            "monokai",
+            "catppuccin",
+            "github",
+            "solarized",
+            "one-dark-pro",
+            "dracula",
+            "material-theme",
+            "nord",
+            "tokyo-night"
+          ],
+          "enumDescriptions": [
+            "Monokai - Classic dark theme with vibrant syntax highlighting",
+            "Catppuccin - Popular pastel theme with excellent readability",
+            "GitHub - Clean and modern theme matching GitHub's interface",
+            "Solarized - Precision colors for machines and people",
+            "One Dark Pro - Atom's iconic One Dark theme",
+            "Dracula - A dark theme for vampires and developers",
+            "Material Theme - Google's Material Design colors",
+            "Nord - An arctic, north-bluish color palette",
+            "Tokyo Night - A clean, dark theme inspired by Tokyo's neon nights"
+          ],
+          "default": "monokai",
+          "description": "Choose the color theme for flowchart nodes"
+        },
+        "visor.complexity.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable cyclomatic complexity analysis and display"
+        },
+        "visor.complexity.displayInNodes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show complexity indicators directly on flowchart nodes"
+        },
+        "visor.complexity.displayInPanel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show complexity information in the dedicated panel"
+        },
+        "visor.complexity.displayInline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show cyclomatic complexity as an inline decoration above the function definition."
+        },
+        "visor.complexity.thresholds.low": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Upper threshold for low complexity (1 to this value)"
+        },
+        "visor.complexity.thresholds.medium": {
+          "type": "number",
+          "default": 10,
+          "minimum": 2,
+          "description": "Upper threshold for medium complexity"
+        },
+        "visor.complexity.thresholds.high": {
+          "type": "number",
+          "default": 20,
+          "minimum": 3,
+          "description": "Upper threshold for high complexity (above this is very high)"
+        },
+        "visor.panel.defaultPosition": {
+          "type": "string",
+          "enum": [
+            "beside",
+            "two",
+            "three"
+          ],
+          "enumDescriptions": [
+            "Open beside the current editor",
+            "Open in the second column",
+            "Open in the third column"
+          ],
+          "default": "two",
+          "description": "Default position for new flowchart panels"
+        },
+        "visor.panel.retainWhenHidden": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep panel content when hidden to improve performance"
+        },
+        "visor.panel.enableFindWidget": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable find/search functionality in panel view"
+        },
+        "visor.flowchart.scope": {
+          "type": "string",
+          "enum": [
+            "file",
+            "function"
+          ],
+          "enumDescriptions": [
+            "Generate flowcharts for the entire file (grouped by function)",
+            "Generate flowcharts only for the function under the cursor"
+          ],
+          "default": "file",
+          "description": "Scope of flowchart generation"
+        },
+        "visor.llm.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable LLM-based human-friendly node labels toggle in the flowchart webview"
+        },
+        "visor.llm.provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "gemini",
+            "groq",
+            "ollama"
+          ],
+          "default": "openai",
+          "description": "LLM provider used for translating node labels"
+        },
+        "visor.llm.model": {
+          "type": "string",
+          "default": "openai/gpt-oss-20b",
+          "description": "Model identifier for the selected LLM provider"
+        },
+        "visor.llm.style": {
+          "type": "string",
+          "default": "concise",
+          "description": "Style preference for rewritten labels (e.g., concise, explanatory)"
+        },
+        "visor.llm.language": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred output language for labels (empty for English)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "yarn run package",
+    "clean": "rm -rf dist",
+    "compile": "yarn run clean && webpack",
+    "watch": "webpack --watch",
+    "package": "yarn run clean && webpack --mode production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "publish:patch": "vsce publish patch",
+    "publish:minor": "vsce publish minor",
+    "publish:major": "vsce publish major",
+    "release": "yarn run pretest && vsce publish patch && git push --follow-tags"
+  },
+  "dependencies": {
+    "@vscode/tree-sitter-wasm": "^0.1.4",
+    "web-tree-sitter": "^0.22.2"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.102.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "copy-webpack-plugin": "^12.0.2",
+    "eslint": "^9.25.1",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.99.7",
+    "webpack-cli": "^6.0.1"
+  },
+  "funding": {
+    "type": "buymeacoffee",
+    "url": "https://buymeacoffee.com/sidsodsud"
+  }
+}
