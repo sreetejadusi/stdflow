@@ -240,7 +240,21 @@ export class TsAstParser extends AbstractParser {
 
     // Create semantic entry and exit nodes
     nodes.push(
-      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+      this.createSemanticNode(
+        entryId,
+        "Start",
+        NodeType.ENTRY,
+        targetNode,
+        undefined,
+        {
+          function_name: funcNameStr,
+          parameters: this.getFunctionParametersText(
+            targetNode,
+            isArrowFunction,
+            isMethod
+          ),
+        }
+      )
     );
     nodes.push(
       this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
@@ -616,6 +630,97 @@ export class TsAstParser extends AbstractParser {
         : [...consequenceResult.exitPoints, ...alternativeResult.exitPoints],
       nodesConnectedToExit
     );
+  }
+
+  protected buildTemplateData(
+    nodeType: NodeType,
+    syntaxNode: Parser.SyntaxNode
+  ): Record<string, string> | undefined {
+    if (
+      (nodeType === NodeType.FUNCTION_CALL ||
+        nodeType === NodeType.METHOD_CALL) &&
+      syntaxNode.type === "call_expression"
+    ) {
+      const funcNode =
+        syntaxNode.childForFieldName("function") ||
+        syntaxNode.childForFieldName("callee");
+      const argsNode = syntaxNode.childForFieldName("arguments");
+      const args = argsNode?.namedChildren || [];
+      const formattedArgs = args
+        .map((arg) => this.formatTypeScriptArgument(arg))
+        .filter(Boolean)
+        .join(", ");
+      const rawName = funcNode
+        ? this.humanizeExpression(funcNode.text)
+        : "function";
+      const friendlyName =
+        rawName === "console log" ||
+        rawName === "console error" ||
+        rawName === "console warn"
+          ? "output"
+          : rawName;
+      return {
+        function_name: friendlyName,
+        arguments: formattedArgs || "inputs",
+      };
+    }
+
+    return super.buildTemplateData(nodeType, syntaxNode);
+  }
+
+  private formatTypeScriptArgument(arg: Parser.SyntaxNode): string {
+    if (arg.type === "object" || arg.type === "object_literal") {
+      const parts = arg.namedChildren
+        .map((prop) => {
+          const nameNode =
+            prop.childForFieldName("name") ||
+            prop.childForFieldName("property") ||
+            prop.childForFieldName("key");
+          const valueNode = prop.childForFieldName("value");
+          if (nameNode && valueNode) {
+            return `${this.humanizeExpression(nameNode.text)} set to ${this.humanizeExpression(
+              valueNode.text
+            )}`;
+          }
+          if (nameNode) {
+            return this.humanizeExpression(nameNode.text);
+          }
+          return undefined;
+        })
+        .filter(Boolean);
+      if (parts.length > 0) {
+        return `named values: ${parts.join(", ")}`;
+      }
+    }
+
+    if (arg.type === "shorthand_property_identifier") {
+      return this.humanizeExpression(arg.text);
+    }
+
+    return this.humanizeExpression(arg.text);
+  }
+
+  private getFunctionParametersText(
+    targetNode: Parser.SyntaxNode,
+    isArrow: boolean,
+    isMethod: boolean
+  ): string {
+    let paramsNode: Parser.SyntaxNode | null | undefined = null;
+    if (isArrow) {
+      const arrowFunc = targetNode.childForFieldName("value");
+      paramsNode =
+        arrowFunc?.childForFieldName("parameters") ||
+        arrowFunc?.childForFieldName("parameter");
+    } else if (isMethod) {
+      paramsNode = targetNode.childForFieldName("parameters");
+    } else {
+      paramsNode = targetNode.childForFieldName("parameters");
+    }
+
+    const rawText = paramsNode?.text || "";
+    if (!rawText) return "";
+    const cleaned = this.humanizeExpression(rawText).replace(/^parameters\s*/i, "");
+    return cleaned;
   }
 
   private processIfStatement(

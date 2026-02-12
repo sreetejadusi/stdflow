@@ -50,6 +50,7 @@ export interface FlowchartNode {
   location?: Location;
   shape?: "rect" | "diamond" | "round" | "stadium";
   style?: string;
+  templateData?: Record<string, string>;
 
   // Enhanced node categorization
   nodeType?: NodeType;

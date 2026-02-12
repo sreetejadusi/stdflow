@@ -70,6 +70,146 @@ export class EnhancedMermaidGenerator {
     return edgeMap;
   }
 
+  private resolveLabel(node: FlowchartNode): string {
+    if (node.nodeType === NodeType.ENTRY && node.templateData?.function_name) {
+      const params = node.templateData.parameters;
+      if (params) {
+        return `Begin execution of ${node.templateData.function_name} with parameters ${params}`;
+      }
+      return `Begin execution of ${node.templateData.function_name}`;
+    }
+
+    if (node.nodeType === NodeType.LOOP_START && node.templateData?.condition) {
+      const condition = node.templateData.condition;
+      if (/^(each|for each)\b/i.test(condition)) {
+        return `Repeat for ${condition}`;
+      }
+      return `Repeat while ${condition} holds`;
+    }
+
+    const template = this.getTemplateForNodeType(node.nodeType);
+    const safeLabel = this.isLikelyCodeSnippet(node.label) ? undefined : node.label;
+    const hasTemplateData =
+      node.templateData && Object.keys(node.templateData).length > 0;
+
+    if (template && hasTemplateData) {
+      return this.fillTemplate(template, node.templateData || {}, safeLabel, node.nodeType);
+    }
+
+    if (template && !hasTemplateData && node.label) {
+      // Unknown mapping: show the original code label
+      return node.label;
+    }
+
+    if (safeLabel) {
+      return safeLabel;
+    }
+
+    return this.getDefaultLabelForNodeType(node.nodeType);
+  }
+
+  private getTemplateForNodeType(nodeType?: NodeType): string | undefined {
+    switch (nodeType) {
+      case NodeType.ASSIGNMENT:
+        return "Set {target} to {value}";
+      case NodeType.FUNCTION_CALL:
+      case NodeType.METHOD_CALL:
+      case NodeType.MACRO_CALL:
+        return "Invoke {function_name} with {arguments}";
+      case NodeType.DECISION:
+        return "Check whether {condition} is true";
+      case NodeType.LOOP_START:
+        return "Repeat while {condition} holds";
+      case NodeType.LOOP_END:
+        return "End the repetition";
+      case NodeType.RETURN:
+        return "Return {value} to the caller";
+      case NodeType.ASYNC_OPERATION:
+      case NodeType.AWAIT:
+        return "Wait for {operation} to finish";
+      case NodeType.EXCEPTION:
+        return "Raise an error: {details}";
+      case NodeType.BREAK_CONTINUE:
+        return "Alter the current loop flow";
+      case NodeType.ENTRY:
+        return "Begin execution of {function_name}";
+      case NodeType.EXIT:
+        return "Finish execution";
+      default:
+        return undefined;
+    }
+  }
+
+  private fillTemplate(
+    template: string,
+    data: Record<string, string>,
+    fallbackLabel: string | undefined,
+    nodeType?: NodeType
+  ): string {
+    const resolved = template.replace(/\{([^}]+)\}/g, (_match, key) => {
+      const value = data[key];
+      if (value) return value;
+      if (key === "label" && fallbackLabel) return fallbackLabel;
+      switch (key) {
+        case "condition":
+          return "a condition";
+        case "value":
+          return "a value";
+        case "target":
+          return "a target";
+        case "arguments":
+          return "inputs";
+        case "function_name":
+          return "function";
+        case "operation":
+          return "an operation";
+        case "details":
+          return "an error";
+        default:
+          return "";
+      }
+    });
+
+    return resolved.replace(/\s+/g, " ").trim();
+  }
+
+  private getDefaultLabelForNodeType(nodeType?: NodeType): string {
+    switch (nodeType) {
+      case NodeType.ASSIGNMENT:
+        return "Update a value";
+      case NodeType.FUNCTION_CALL:
+      case NodeType.METHOD_CALL:
+      case NodeType.MACRO_CALL:
+        return "Invoke a function";
+      case NodeType.DECISION:
+        return "Evaluate a condition";
+      case NodeType.LOOP_START:
+        return "Begin a loop";
+      case NodeType.LOOP_END:
+        return "End a loop";
+      case NodeType.RETURN:
+        return "Return a result";
+      case NodeType.ASYNC_OPERATION:
+      case NodeType.AWAIT:
+        return "Wait for an operation";
+      case NodeType.EXCEPTION:
+        return "Handle an error";
+      case NodeType.BREAK_CONTINUE:
+        return "Alter loop flow";
+      case NodeType.ENTRY:
+        return "Start execution";
+      case NodeType.EXIT:
+        return "Finish execution";
+      default:
+        return "Perform an operation";
+    }
+  }
+
+  private isLikelyCodeSnippet(label: string | undefined): boolean {
+    if (!label) return false;
+    return /[;{}=<>]|\(|\)|\[|\]|->|::/.test(label);
+  }
+
   public generate(ir: FlowchartIR): string {
     this.sb.clear();
     this.sb.appendLine("graph TD");
@@ -113,7 +253,7 @@ export class EnhancedMermaidGenerator {
 
     const writeNode = (node: FlowchartNode) => {
       const shape = this.getShape(node);
-      let label = this.escapeString(node.label);
+      let label = this.escapeString(this.resolveLabel(node));
 
       if (
         this.complexityConfig.enabled &&

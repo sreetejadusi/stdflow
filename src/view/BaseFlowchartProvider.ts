@@ -305,11 +305,6 @@ export abstract class BaseFlowchartProvider {
           const scope = this._currentScope || this.getFlowchartScope();
           const selection = event.selections[0];
           if (scope === "file") {
-            const offset = event.textEditor.document.offsetAt(selection.active);
-            const entry = this._locationMap.find(
-              (e) => offset >= e.start && offset <= e.end
-            );
-            this.highlightNode(entry ? entry.nodeId : null);
             return;
           }
           // If the cursor is still within the same function, just highlight the node
@@ -317,11 +312,7 @@ export abstract class BaseFlowchartProvider {
             this._currentFunctionRange &&
             this._currentFunctionRange.contains(selection)
           ) {
-            const offset = event.textEditor.document.offsetAt(selection.active);
-            const entry = this._locationMap.find(
-              (e) => offset >= e.start && offset <= e.end
-            );
-            this.highlightNode(entry ? entry.nodeId : null);
+            return;
           } else {
             // If the cursor moves out of the function, regenerate the flowchart
             await this.updateView(event.textEditor);
@@ -636,15 +627,7 @@ export abstract class BaseFlowchartProvider {
     const shouldUpdate = this._shouldUpdate(document, position, scope);
     if (!shouldUpdate) {
       // Just update highlighting if we're still in the same function
-      if (
-        this._currentFunctionRange &&
-        this._currentFunctionRange.contains(editor.selection.active)
-      ) {
-        const entry = this._locationMap.find(
-          (e) => position >= e.start && position <= e.end
-        );
-        this.highlightNode(entry ? entry.nodeId : null);
-      }
+      // Non-interactive: do not highlight nodes.
       return;
     }
 
@@ -711,11 +694,7 @@ export abstract class BaseFlowchartProvider {
       this.setWebviewHtml(this.getWebviewContent(mermaidCode, this.getNonce(), complexityToDisplay, availability));
 
       // After updating the view, immediately highlight the node for the current cursor
-      const offset = editor.document.offsetAt(editor.selection.active);
-      const entry = this._locationMap.find(
-        (e) => offset >= e.start && offset <= e.end
-      );
-      this.highlightNode(entry ? entry.nodeId : null);
+      // Non-interactive: no node highlighting after render.
 
     } catch (error) {
       this.clearComplexityDecoration(editor); 
@@ -815,17 +794,16 @@ export abstract class BaseFlowchartProvider {
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@${SVG_PAN_ZOOM_VERSION}/dist/svg-pan-zoom.min.js"></script>
         <style>
             :root {
-                --hover-fill: rgba(255, 165, 0, 0.3);
-                --hover-stroke: #ff6b35;
-                --hover-stroke-width: 3px;
-                --hover-edge-color: #ff6b35;
-                --hover-edge-width: 3px;
+                --edge-color: rgba(148, 163, 184, 0.85);
+                --edge-muted: rgba(148, 163, 184, 0.55);
+                --edge-label-bg: rgba(15, 23, 42, 0.55);
+                --node-shadow: rgba(0, 0, 0, 0.18);
             }
 
             body, html {
                 background-color: var(--vscode-editor-background);
                 color: var(--vscode-editor-foreground);
-                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-family: "IBM Plex Sans", "SF Pro Text", "Segoe UI", sans-serif;
                 margin: 0;
                 padding: 0;
                 width: 100%;
@@ -845,59 +823,36 @@ export abstract class BaseFlowchartProvider {
                 }
             }
             .mermaid { width: 100%; height: 100%; }
-            .mermaid svg { width: 100%; height: 100%; }
+            .mermaid svg { width: 100%; height: 100%; shape-rendering: geometricPrecision; }
 
-            /* Node highlighting styles */
-            .highlighted > rect,
-            .highlighted > polygon,
-            .highlighted > circle,
-            .highlighted > path {
-                stroke: var(--vscode-editor-selectionBackground) !important;
-                stroke-width: 4px !important;
+            /* Professional edge styling */
+            .mermaid .edgePath path {
+                stroke: var(--edge-muted) !important;
+                stroke-width: 1.6px !important;
+            }
+            .mermaid .arrowheadPath,
+            .mermaid .arrowhead path {
+                fill: var(--edge-muted) !important;
+                stroke: var(--edge-muted) !important;
+            }
+            .mermaid .edgeLabel {
+                background: var(--edge-label-bg) !important;
+                color: var(--vscode-editor-foreground) !important;
+                border-radius: 6px;
+                padding: 2px 6px;
+            }
+            .mermaid .edgeLabel tspan {
+                font-size: 12px;
+                letter-spacing: 0.2px;
             }
 
-            /* Transitions */
-            .mermaid svg .node > *, .mermaid .edge-path, .mermaid .edge-path path, .mermaid .arrowhead, .mermaid .arrowhead path, .mermaid line, .mermaid g > path {
-                transition: fill 0.15s ease-in-out, stroke 0.15s ease-in-out, filter 0.15s ease-in-out, stroke-width 0.15s ease-in-out;
+            /* Node polish */
+            .mermaid .node > * {
+                filter: drop-shadow(0 6px 12px var(--node-shadow));
             }
-
-
-            
-            /* Hovered node, child, or edge */
-            .mermaid svg .node.hover-highlight > *,
-            .mermaid svg .node.child-highlight > * {
-                fill: var(--hover-fill) !important;
-                stroke: var(--hover-stroke) !important;
-                stroke-width: var(--hover-stroke-width) !important;
-                filter: drop-shadow(0 0 8px var(--hover-stroke));
-            }
-            
-            /* Enhanced edge highlighting that works with different Mermaid edge structures */
-            .mermaid g[class*="edge"].hover-highlight > *,
-            .mermaid g[id^="L_"].hover-highlight > *,
-            .mermaid path[class*="edge"].hover-highlight,
-            .mermaid g.hover-highlight > path,
-            .mermaid g.edgePath.hover-highlight > path.path {
-                stroke: var(--hover-edge-color) !important;
-                stroke-width: var(--hover-edge-width) !important;
-                filter: drop-shadow(0 0 2px var(--hover-edge-color));
-            }
-
-            /* Arrow markers for highlighted edges */
-            .mermaid g[class*="edge"].hover-highlight polygon,
-            .mermaid g[id^="L_"].hover-highlight polygon,
-            .mermaid g.hover-highlight polygon,
-            .mermaid g.edgePath.hover-highlight polygon {
-                fill: var(--hover-edge-color) !important;
-                stroke: var(--hover-edge-color) !important;
-            }
-
-            /* Edge labels */
-            .mermaid g[class*="edge"].hover-highlight text,
-            .mermaid g[id^="L_"].hover-highlight text,
-            .mermaid g.hover-highlight text {
-                fill: var(--hover-edge-color) !important;
-                font-weight: bold !important;
+            .mermaid .node text {
+                font-weight: 500;
+                letter-spacing: 0.1px;
             }
             
             #mermaid-source { display: none; }
@@ -919,31 +874,12 @@ export abstract class BaseFlowchartProvider {
             let isLLMEnabled = false;
 
             function onNodeClick(start, end) {
-                vscode.postMessage({
-                    command: 'highlightCode',
-                    payload: { start, end }
-                });
+                // Non-interactive: do nothing.
             }
-
-            let highlightedNodeId = null;
 
             window.addEventListener('message', event => {
                 const message = event.data;
                 switch (message.command) {
-                    case 'highlightNode':
-                        if (highlightedNodeId) {
-                            const oldElem = document.getElementById(highlightedNodeId);
-                            if (oldElem) oldElem.classList.remove('highlighted');
-                        }
-
-                        const newId = message.payload.nodeId;
-                        if (newId) {
-                            const newElem = document.getElementById(newId);
-                            if (newElem) newElem.classList.add('highlighted');
-                        }
-                        highlightedNodeId = newId;
-                        break;
-
                     case 'applyMermaid': {
                         const mermaidDiv = document.querySelector('.mermaid');
                         const sourceDiv = document.getElementById('mermaid-source');
@@ -1016,7 +952,9 @@ export abstract class BaseFlowchartProvider {
                         flowchart: {
                             useMaxWidth: false,
                             htmlLabels: true,
-                            curve: 'basis'
+                            curve: 'basis',
+                            nodeSpacing: 32,
+                            rankSpacing: 46
                         }
                     });
                 } catch (error) {
@@ -1055,115 +993,7 @@ export abstract class BaseFlowchartProvider {
                 });
 
                 // Parse edge metadata from mermaid source comments
-                function parseEdgeMetadata() {
-                    const mermaidSource = document.getElementById('mermaid-source').textContent;
-                    const edgeMetadata = new Map();
-                    
-                    const lines = mermaidSource.split('\\n');
-                    for (const line of lines) {
-                        const match = line.match(/%% EDGE_META:([^:]+):([^:]+)/);
-                        if (match) {
-                            const [, source, target] = match;
-                            if (!edgeMetadata.has(source)) {
-                                edgeMetadata.set(source, []);
-                            }
-                            edgeMetadata.get(source).push(target);
-                        }
-                    }
-                    return edgeMetadata;
-                }
-
-                function extractBaseId(fullNodeId) {
-                    if (!fullNodeId) return '';
-                    // Remove flowchart prefix and suffix numbers
-                    let base = fullNodeId.startsWith('flowchart-') 
-                        ? fullNodeId.replace(/^flowchart-/, '') 
-                        : fullNodeId;
-                    base = base.replace(/-[\\d-]+$/, '');
-                    return base;
-                }
-
-                function findOutgoingEdges(fullNodeId, edgeMetadata) {
-                    const baseId = extractBaseId(fullNodeId);
-                    if (!baseId) return [];
-
-                    const outgoingEdges = [];
-                    const targets = edgeMetadata.get(baseId) || [];
-                    
-                    // Look for edges with IDs that contain the source->target relationship
-                    for (const target of targets) {
-                        const edgePatterns = [
-                            "L_" + baseId + "_" + target + "_",
-                            baseId + "_" + target,
-                            baseId + "-" + target,
-                            "edge_" + baseId + "_" + target
-                        ];
-                        
-                        for (const pattern of edgePatterns) {
-                            const matchingEdge = document.querySelector('[id*="' + pattern + '"]');
-                            if (matchingEdge) {
-                                outgoingEdges.push(matchingEdge);
-                                break;
-                            }
-                        }
-                    }
-                    return outgoingEdges;
-                }
-
-                function findConnectedNodes(baseId, edgeMetadata) {
-                    const targets = edgeMetadata.get(baseId) || [];
-                    const connectedNodes = [];
-                    
-                    for (const targetBaseId of targets) {
-                        // Try multiple patterns to find target nodes
-                        const patterns = [
-                            '[id*="' + targetBaseId + '"]',
-                            '#flowchart-' + targetBaseId + '-',
-                            '[id^="flowchart-' + targetBaseId + '"]'
-                        ];
-                        
-                        for (const pattern of patterns) {
-                            const targetNode = document.querySelector(pattern);
-                            if (targetNode && !connectedNodes.includes(targetNode)) {
-                                connectedNodes.push(targetNode);
-                                break;
-                            }
-                        }
-                    }
-                    return connectedNodes;
-                }
-
-                // Parse edge metadata once
-                const edgeMetadata = parseEdgeMetadata();
-
-                const allNodes = svgElement.querySelectorAll('.node');
-                allNodes.forEach((node) => {
-                    const fullNodeId = node.id;
-                    if (!fullNodeId) return;
-
-                    node.addEventListener('mouseenter', (event) => {
-                        event.stopPropagation();
-                        node.classList.add('hover-highlight');
-
-                        const baseId = extractBaseId(fullNodeId);
-                        
-                        const outgoingEdges = findOutgoingEdges(fullNodeId, edgeMetadata);
-                        outgoingEdges.forEach(edge => {
-                            edge.classList.add('hover-highlight');
-                        });
-
-                        const connectedNodes = findConnectedNodes(baseId, edgeMetadata);
-                        connectedNodes.forEach(connectedNode => {
-                            connectedNode.classList.add('child-highlight');
-                        });
-                    });
-
-                    node.addEventListener('mouseleave', () => {
-                        document.querySelectorAll('.hover-highlight, .child-highlight').forEach(el => {
-                            el.classList.remove('hover-highlight', 'child-highlight');
-                        });
-                    });
-                });
+                // Non-interactive mode: no hover or node/edge highlighting.
             }
 
             window.addEventListener('load', () => {

@@ -216,8 +216,11 @@ export abstract class AbstractParser {
     label: string,
     nodeType: NodeType,
     syntaxNode?: Parser.SyntaxNode,
-    shape?: "rect" | "diamond" | "round" | "stadium"
+    shape?: "rect" | "diamond" | "round" | "stadium",
+    templateData?: Record<string, string>
   ): FlowchartNode {
+    const resolvedTemplateData =
+      templateData || (syntaxNode ? this.buildTemplateData(nodeType, syntaxNode) : undefined);
     const node: FlowchartNode = {
       id,
       label: this.escapeString(label),
@@ -225,6 +228,7 @@ export abstract class AbstractParser {
       nodeCategory: this.getCategoryForType(nodeType),
       shape: shape || this.getDefaultShapeForType(nodeType),
       style: this.getStyleForNodeType(nodeType),
+      templateData: resolvedTemplateData,
       semanticInfo: syntaxNode
         ? this.extractSemanticInfo(syntaxNode)
         : undefined,
@@ -683,11 +687,14 @@ export abstract class AbstractParser {
 
     // Try to determine the appropriate node type based on syntax
     const nodeType = this.inferNodeTypeFromSyntax(statement);
+    const templateData = this.buildTemplateData(nodeType, statement);
     const node = this.createSemanticNode(
       nodeId,
       statement.text,
       nodeType,
-      statement
+      statement,
+      undefined,
+      templateData
     );
 
     this.locationMap.push({
@@ -745,6 +752,157 @@ export abstract class AbstractParser {
 
     // Default to process for general statements
     return NodeType.PROCESS;
+  }
+
+  protected buildTemplateData(
+    nodeType: NodeType,
+    syntaxNode: Parser.SyntaxNode
+  ): Record<string, string> | undefined {
+    try {
+      switch (nodeType) {
+        case NodeType.ASSIGNMENT: {
+          const left =
+            syntaxNode.childForFieldName("left") ||
+            syntaxNode.childForFieldName("target") ||
+            syntaxNode.childForFieldName("name");
+          const right =
+            syntaxNode.childForFieldName("right") ||
+            syntaxNode.childForFieldName("value");
+          return {
+            target: left ? this.humanizeExpression(left.text) : "value",
+            value: right ? this.humanizeExpression(right.text) : "expression",
+          };
+        }
+        case NodeType.FUNCTION_CALL:
+        case NodeType.METHOD_CALL: {
+          const funcNode =
+            syntaxNode.childForFieldName("function") ||
+            syntaxNode.childForFieldName("callee") ||
+            syntaxNode.childForFieldName("name") ||
+            syntaxNode.namedChild(0);
+          const argsNode =
+            syntaxNode.childForFieldName("arguments") ||
+            syntaxNode.childForFieldName("argument_list");
+          const args =
+            argsNode?.namedChildren
+              .map((arg) => this.humanizeExpression(arg.text))
+              .filter(Boolean)
+              .join(", ") || "";
+          return {
+            function_name: funcNode
+              ? this.humanizeExpression(funcNode.text)
+              : "function",
+            arguments: args || "inputs",
+          };
+        }
+        case NodeType.DECISION: {
+          const condition = syntaxNode.childForFieldName("condition");
+          return {
+            condition: condition
+              ? this.humanizeExpression(condition.text)
+              : this.humanizeExpression(syntaxNode.text) || "a condition",
+          };
+        }
+        case NodeType.LOOP_START: {
+          const condition =
+            syntaxNode.childForFieldName("condition") ||
+            syntaxNode.childForFieldName("left") ||
+            syntaxNode.childForFieldName("right");
+          if (condition) {
+            return { condition: this.humanizeExpression(condition.text) };
+          }
+          return { condition: this.humanizeExpression(syntaxNode.text) };
+        }
+        case NodeType.RETURN: {
+          const valueNode = syntaxNode.namedChild(0);
+          return {
+            value: valueNode
+              ? this.humanizeExpression(valueNode.text)
+              : "result",
+          };
+        }
+        case NodeType.ASYNC_OPERATION:
+        case NodeType.AWAIT: {
+          const opNode = syntaxNode.namedChild(0);
+          return {
+            operation: opNode
+              ? this.humanizeExpression(opNode.text)
+              : "operation",
+          };
+        }
+        case NodeType.EXCEPTION: {
+          const details =
+            syntaxNode.namedChildren
+              .map((n) => this.humanizeExpression(n.text))
+              .filter(Boolean)
+              .join(", ") || "";
+          return {
+            details: details || "error",
+          };
+        }
+        default:
+          return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+  }
+
+  protected getDefaultLabelForNodeType(nodeType: NodeType): string {
+    switch (nodeType) {
+      case NodeType.ASSIGNMENT:
+        return "Update a value";
+      case NodeType.FUNCTION_CALL:
+      case NodeType.METHOD_CALL:
+        return "Invoke a function";
+      case NodeType.DECISION:
+        return "Evaluate a condition";
+      case NodeType.LOOP_START:
+        return "Begin a loop";
+      case NodeType.LOOP_END:
+        return "End a loop";
+      case NodeType.RETURN:
+        return "Return a result";
+      case NodeType.ASYNC_OPERATION:
+      case NodeType.AWAIT:
+        return "Wait for an operation";
+      case NodeType.EXCEPTION:
+        return "Handle an error";
+      case NodeType.BREAK_CONTINUE:
+        return "Alter loop flow";
+      case NodeType.ENTRY:
+        return "Start execution";
+      case NodeType.EXIT:
+        return "Finish execution";
+      default:
+        return "Perform an operation";
+    }
+  }
+
+  protected humanizeExpression(text: string): string {
+    const normalized = text
+      .replace(/==/g, " equals ")
+      .replace(/!=/g, " not equal to ")
+      .replace(/>=/g, " greater than or equal to ")
+      .replace(/<=/g, " less than or equal to ")
+      .replace(/>/g, " greater than ")
+      .replace(/</g, " less than ")
+      .replace(/\+/g, " plus ")
+      .replace(/-/g, " minus ")
+      .replace(/\*/g, " times ")
+      .replace(/\//g, " divided by ")
+      .replace(/&&/g, " and ")
+      .replace(/\|\|/g, " or ")
+      .replace(/[()[\]{};]/g, " ")
+      .replace(/:/g, " ")
+      .replace(/\./g, " ")
+      .replace(/::/g, " ")
+      .replace(/->/g, " ")
+      .replace(/['"]/g, " ")
+      .replace(/,/g, " and ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return normalized || "value";
   }
 
   // Memory management utilities

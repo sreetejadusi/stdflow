@@ -132,7 +132,17 @@ export class CAstParser extends AbstractParser {
 
     // Create semantic entry and exit nodes
     nodes.push(
-      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+      this.createSemanticNode(
+        entryId,
+        "Start",
+        NodeType.ENTRY,
+        targetNode,
+        undefined,
+        {
+          function_name: funcNameStr,
+          parameters: this.getParametersText(declarator),
+        }
+      )
     );
     nodes.push(
       this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
@@ -269,7 +279,35 @@ export class CAstParser extends AbstractParser {
           loopContext,
           finallyContext
         );
+      case "declaration":
+        return this.processDeclarationStatement(statement);
       default:
+        if (statement.type === "expression_statement") {
+          const child = statement.firstNamedChild;
+          if (child?.type === "call_expression") {
+            const nodeId = this.generateNodeId("call");
+            const templateData = this.buildTemplateData(
+              NodeType.FUNCTION_CALL,
+              child
+            );
+            const node = this.createSemanticNode(
+              nodeId,
+              "Invoke a function",
+              NodeType.FUNCTION_CALL,
+              child,
+              undefined,
+              templateData
+            );
+            this.locationMap.push({
+              start: child.startIndex,
+              end: child.endIndex,
+              nodeId,
+            });
+            return this.createProcessResult([node], [], nodeId, [
+              { id: nodeId },
+            ]);
+          }
+        }
         return this.processDefaultStatement(statement);
     }
   }
@@ -330,6 +368,153 @@ export class CAstParser extends AbstractParser {
     return identifierChild?.text || null;
   }
 
+  private extractVariableName(
+    declarator: Parser.SyntaxNode | null
+  ): string | null {
+    if (!declarator) return null;
+    if (declarator.type === "identifier") return declarator.text;
+    if (declarator.type === "pointer_declarator") {
+      return this.extractVariableName(declarator.childForFieldName("declarator"));
+    }
+    if (declarator.type === "array_declarator") {
+      return this.extractVariableName(declarator.childForFieldName("declarator"));
+    }
+    const identifierChild = declarator.children.find(
+      (child) => child.type === "identifier"
+    );
+    return identifierChild?.text || null;
+  }
+
+  private getParametersText(declarator?: Parser.SyntaxNode | null): string {
+    if (!declarator) return "";
+    const text = declarator.text || "";
+    const openIdx = text.indexOf("(");
+    const closeIdx = text.lastIndexOf(")");
+    if (openIdx < 0 || closeIdx <= openIdx) return "";
+    const inside = text.slice(openIdx + 1, closeIdx).trim();
+    return inside ? this.humanizeExpression(inside) : "";
+  }
+
+  protected buildTemplateData(
+    nodeType: NodeType,
+    syntaxNode: Parser.SyntaxNode
+  ): Record<string, string> | undefined {
+    if (
+      (nodeType === NodeType.FUNCTION_CALL ||
+        nodeType === NodeType.METHOD_CALL) &&
+      syntaxNode.type === "call_expression"
+    ) {
+      const funcNode = syntaxNode.childForFieldName("function");
+      const argsNode = syntaxNode.childForFieldName("arguments");
+      const args = argsNode?.namedChildren || [];
+      const rawName = funcNode ? this.humanizeExpression(funcNode.text) : "function";
+      const friendlyName =
+        rawName === "printf" ? "output" : rawName === "scanf" ? "read input" : rawName;
+      const formattedArgs = this.formatCArguments(friendlyName, args);
+      return {
+        function_name: friendlyName,
+        arguments: formattedArgs || "inputs",
+      };
+    }
+
+    if (nodeType === NodeType.ASSIGNMENT) {
+      if (syntaxNode.type === "update_expression") {
+        const target = syntaxNode.childForFieldName("argument") || syntaxNode.namedChild(0);
+        return {
+          target: target ? this.humanizeExpression(target.text) : "value",
+          value: "next value",
+        };
+      }
+    }
+
+    return super.buildTemplateData(nodeType, syntaxNode);
+  }
+
+  private formatCArguments(
+    functionName: string,
+    args: Parser.SyntaxNode[]
+  ): string {
+    if (args.length === 0) return "";
+
+    if (functionName === "output") {
+      const [first, ...rest] = args;
+      const message = first ? this.cleanStringLiteral(first.text) : "";
+      const values = rest
+        .map((arg) => this.humanizeExpression(arg.text))
+        .filter(Boolean);
+      if (message && values.length > 0) {
+        return `message ${message} with ${values.join(" and ")}`;
+      }
+      if (message) {
+        return `message ${message}`;
+      }
+      return values.join(" and ");
+    }
+
+    if (functionName === "read input") {
+      const targets = args
+        .slice(1)
+        .map((arg) => this.humanizeExpression(arg.text.replace(/^&/, "")))
+        .filter(Boolean);
+      if (targets.length > 0) {
+        return `store input in ${targets.join(" and ")}`;
+      }
+      return "store input";
+    }
+
+    return args
+      .map((arg) => this.humanizeExpression(arg.text))
+      .filter(Boolean)
+      .join(" and ");
+  }
+
+  private cleanStringLiteral(text: string): string {
+    const trimmed = text.trim();
+    if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+      return trimmed.slice(1, -1);
+    }
+    return trimmed;
+  }
+
+  private processDeclarationStatement(
+    statement: Parser.SyntaxNode
+  ): ProcessResult {
+    const declarators = statement.descendantsOfType("init_declarator");
+    const names: string[] = [];
+
+    if (declarators.length > 0) {
+      for (const declarator of declarators) {
+        const nameNode = declarator.childForFieldName("declarator");
+        const name = nameNode ? this.extractVariableName(nameNode) : undefined;
+        if (name) names.push(name);
+      }
+    } else {
+      const identifiers = statement.descendantsOfType("identifier");
+      identifiers.forEach((id) => names.push(id.text));
+    }
+
+    const unique = Array.from(new Set(names)).filter(Boolean);
+    const label =
+      unique.length > 0
+        ? `Declare variables ${unique.join(", ")}`
+        : "Declare variables";
+
+    const nodeId = this.generateNodeId("decl");
+    const node = this.createSemanticNode(
+      nodeId,
+      label,
+      NodeType.PROCESS,
+      statement
+    );
+    this.locationMap.push({
+      start: statement.startIndex,
+      end: statement.endIndex,
+      nodeId,
+    });
+    return this.createProcessResult([node], [], nodeId, [{ id: nodeId }]);
+  }
+
   private processIfStatement(
     ifNode: Parser.SyntaxNode,
     exitId: string,
@@ -347,9 +532,11 @@ export class CAstParser extends AbstractParser {
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         ifConditionId,
-        this.escapeString(ifConditionNode.text),
+        "Check condition",
         NodeType.DECISION,
-        ifConditionNode
+        ifConditionNode,
+        undefined,
+        { condition: this.humanizeExpression(ifConditionNode.text) }
       ),
     ];
 
@@ -457,7 +644,7 @@ export class CAstParser extends AbstractParser {
       nodes.push(
         this.createSemanticNode(
           initId,
-          this.escapeString(initNode.text),
+          initNode.type === "declaration" ? "Initialize loop variables" : "Set initial value",
           NodeType.ASSIGNMENT,
           initNode
         )
@@ -488,9 +675,11 @@ export class CAstParser extends AbstractParser {
       nodes.push(
         this.createSemanticNode(
           conditionId,
-          this.escapeString(conditionNode.text),
-          NodeType.DECISION,
-          conditionNode
+          "Repeat",
+          NodeType.LOOP_START,
+          conditionNode,
+          undefined,
+          { condition: this.humanizeExpression(conditionNode.text) }
         )
       );
       this.locationMap.push({
@@ -510,7 +699,7 @@ export class CAstParser extends AbstractParser {
       nodes.push(
         this.createSemanticNode(
           updateId,
-          this.escapeString(updateNode.text),
+          "Advance loop",
           NodeType.ASSIGNMENT,
           updateNode
         )
@@ -577,16 +766,18 @@ export class CAstParser extends AbstractParser {
     const conditionNode = whileNode.childForFieldName("condition")!;
     const bodyNode = whileNode.childForFieldName("body");
 
-    const conditionText = this.escapeString(conditionNode.text);
+    const conditionText = this.humanizeExpression(conditionNode.text);
     const conditionId = this.generateNodeId("while_cond");
     const loopExitId = this.generateNodeId("while_exit");
 
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         conditionId,
-        conditionText,
-        NodeType.DECISION,
-        conditionNode
+        "Repeat",
+        NodeType.LOOP_START,
+        conditionNode,
+        undefined,
+        { condition: conditionText }
       ),
       this.createSemanticNode(
         loopExitId,
@@ -654,12 +845,15 @@ export class CAstParser extends AbstractParser {
     const conditionId = this.generateNodeId("do_while_cond");
     const loopExitId = this.generateNodeId("do_while_exit");
 
+    const conditionText = this.humanizeExpression(conditionNode.text);
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         conditionId,
-        this.escapeString(conditionNode.text),
-        NodeType.DECISION,
-        conditionNode
+        "Repeat",
+        NodeType.LOOP_START,
+        conditionNode,
+        undefined,
+        { condition: conditionText }
       ),
       this.createSemanticNode(
         loopExitId,
@@ -729,9 +923,11 @@ export class CAstParser extends AbstractParser {
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         switchId,
-        `switch (${this.escapeString(conditionNode.text)})`,
+        "Select matching case",
         NodeType.DECISION,
-        conditionNode
+        conditionNode,
+        undefined,
+        { condition: this.humanizeExpression(conditionNode.text) }
       ),
     ];
 

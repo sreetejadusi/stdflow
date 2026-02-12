@@ -233,9 +233,14 @@ export class PyAstParser extends AbstractParser {
     nodes.push(
       this.createSemanticNode(
         entryId,
-        `Start: ${signature}`,
+        "Start",
         NodeType.ENTRY,
-        targetNode
+        targetNode,
+        undefined,
+        {
+          function_name: funcNameStr,
+          parameters: paramsText.replace(/[()]/g, "").trim(),
+        }
       )
     );
     nodes.push(
@@ -356,7 +361,14 @@ export class PyAstParser extends AbstractParser {
     const exitId = this.generateNodeId("module_end");
 
     nodes.push(
-      this.createSemanticNode(entryId, "Start: module", NodeType.ENTRY)
+      this.createSemanticNode(
+        entryId,
+        "Start",
+        NodeType.ENTRY,
+        undefined,
+        undefined,
+        { function_name: "module" }
+      )
     );
     nodes.push(this.createSemanticNode(exitId, "End", NodeType.EXIT));
 
@@ -588,6 +600,30 @@ export class PyAstParser extends AbstractParser {
         }
 
         if (expressionNode) {
+          if (expressionNode.type === "call") {
+            const nodeId = this.generateNodeId("call");
+            const templateData = this.buildTemplateData(
+              NodeType.FUNCTION_CALL,
+              expressionNode
+            );
+            const node: FlowchartNode = this.createSemanticNode(
+              nodeId,
+              "Invoke a function",
+              NodeType.FUNCTION_CALL,
+              expressionNode,
+              undefined,
+              templateData
+            );
+            this.locationMap.push({
+              start: expressionNode.startIndex,
+              end: expressionNode.endIndex,
+              nodeId,
+            });
+            return this.createProcessResult([node], [], nodeId, [
+              { id: nodeId },
+            ]);
+          }
+
           if (
             expressionNode.type === "conditional_expression" &&
             assignmentTargetNode
@@ -604,9 +640,13 @@ export class PyAstParser extends AbstractParser {
             const nodes: FlowchartNode[] = [
               this.createSemanticNode(
                 conditionId,
-                conditionNode.text,
+                "Check condition",
                 NodeType.DECISION,
-                conditionNode
+                conditionNode,
+                undefined,
+                {
+                  condition: this.humanizeExpression(conditionNode.text),
+                }
               ),
             ];
             const edges: FlowchartEdge[] = [];
@@ -621,9 +661,14 @@ export class PyAstParser extends AbstractParser {
             nodes.push(
               this.createSemanticNode(
                 consequenceId,
-                `${targetText} = ${this.escapeString(consequenceNode.text)}`,
+                "Set value",
                 NodeType.ASSIGNMENT,
-                statement
+                statement,
+                undefined,
+                {
+                  target: this.humanizeExpression(assignmentTargetNode.text),
+                  value: this.humanizeExpression(consequenceNode.text),
+                }
               )
             );
             this.locationMap.push({
@@ -637,9 +682,14 @@ export class PyAstParser extends AbstractParser {
             nodes.push(
               this.createSemanticNode(
                 alternativeId,
-                `${targetText} = ${this.escapeString(alternativeNode.text)}`,
+                "Set value",
                 NodeType.ASSIGNMENT,
-                statement
+                statement,
+                undefined,
+                {
+                  target: this.humanizeExpression(assignmentTargetNode.text),
+                  value: this.humanizeExpression(alternativeNode.text),
+                }
               )
             );
             this.locationMap.push({
@@ -913,6 +963,83 @@ export class PyAstParser extends AbstractParser {
     );
   }
 
+  protected buildTemplateData(
+    nodeType: NodeType,
+    syntaxNode: Parser.SyntaxNode
+  ): Record<string, string> | undefined {
+    if (nodeType === NodeType.ASSIGNMENT) {
+      const left = syntaxNode.childForFieldName("left");
+      const right = syntaxNode.childForFieldName("right");
+      if (left || right) {
+        return {
+          target: left
+            ? this.formatAssignmentSide(left.text)
+            : "value",
+          value: right
+            ? this.formatAssignmentSide(right.text)
+            : "expression",
+        };
+      }
+    }
+
+    if (
+      (nodeType === NodeType.FUNCTION_CALL ||
+        nodeType === NodeType.METHOD_CALL) &&
+      syntaxNode.type === "call"
+    ) {
+      const funcNode =
+        syntaxNode.childForFieldName("function") ||
+        syntaxNode.childForFieldName("callee");
+      const argsNode = syntaxNode.childForFieldName("arguments");
+      const args = argsNode?.namedChildren || [];
+      const formattedArgs = args
+        .map((arg) => this.formatPythonArgument(arg))
+        .filter(Boolean)
+        .join(", ");
+      const rawName = funcNode ? this.humanizeExpression(funcNode.text) : "function";
+      const friendlyName = rawName === "print" ? "output" : rawName;
+      return {
+        function_name: friendlyName,
+        arguments: formattedArgs || "inputs",
+      };
+    }
+
+    return super.buildTemplateData(nodeType, syntaxNode);
+  }
+
+  private formatAssignmentSide(text: string): string {
+    const parts = text
+      .split(",")
+      .map((part) => this.humanizeExpression(part))
+      .filter(Boolean);
+    if (parts.length <= 1) {
+      return parts[0] || this.humanizeExpression(text);
+    }
+    return parts.join(" and ");
+  }
+
+  private formatPythonArgument(arg: Parser.SyntaxNode): string {
+    if (arg.type === "keyword_argument") {
+      const nameNode = arg.childForFieldName("name");
+      const valueNode = arg.childForFieldName("value");
+      if (nameNode && valueNode) {
+        return `${this.humanizeExpression(nameNode.text)} set to ${this.humanizeExpression(
+          valueNode.text
+        )}`;
+      }
+      return this.humanizeExpression(arg.text);
+    }
+
+    if (arg.type === "dictionary_splat" || arg.type === "list_splat") {
+      const valueNode = arg.namedChild(0);
+      return valueNode
+        ? `expand ${this.humanizeExpression(valueNode.text)}`
+        : "expand values";
+    }
+
+    return this.humanizeExpression(arg.text);
+  }
+
   private processIfStatement(
     ifNode: Parser.SyntaxNode,
     exitId: string,
@@ -1067,15 +1194,21 @@ export class PyAstParser extends AbstractParser {
   ): ProcessResult {
     const left = forNode.childForFieldName("left")!.text;
     const right = forNode.childForFieldName("right")!.text;
+    const leftLabel =
+      left.trim() === "_" ? "item" : this.humanizeExpression(left);
     const headerId = this.generateNodeId("for_header");
     const loopExitId = this.generateNodeId("for_exit");
 
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         headerId,
-        `for ${left} in ${right}`,
+        "Repeat",
         NodeType.LOOP_START,
-        forNode
+        forNode,
+        undefined,
+        {
+          condition: `each ${leftLabel} in ${this.humanizeExpression(right)}`,
+        }
       ),
       this.createSemanticNode(
         loopExitId,
@@ -1129,16 +1262,18 @@ export class PyAstParser extends AbstractParser {
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
     const conditionNode = whileNode.childForFieldName("condition")!;
-    const conditionText = this.escapeString(conditionNode.text);
+    const conditionText = this.humanizeExpression(conditionNode.text);
     const conditionId = this.generateNodeId("while_cond");
     const loopExitId = this.generateNodeId("while_exit");
 
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         conditionId,
-        conditionText,
-        NodeType.DECISION,
-        conditionNode
+        "Repeat",
+        NodeType.LOOP_START,
+        conditionNode,
+        undefined,
+        { condition: conditionText }
       ),
       this.createSemanticNode(
         loopExitId,

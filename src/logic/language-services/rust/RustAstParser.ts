@@ -278,7 +278,17 @@ export class RustAstParser extends AbstractParser {
     const exitId = this.generateNodeId("end");
 
     nodes.push(
-      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+      this.createSemanticNode(
+        entryId,
+        "Start",
+        NodeType.ENTRY,
+        targetNode,
+        undefined,
+        {
+          function_name: funcNameStr,
+          parameters: this.getParametersText(targetNode, isClosure),
+        }
+      )
     );
     nodes.push(
       this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
@@ -394,7 +404,7 @@ export class RustAstParser extends AbstractParser {
     const exitId = this.generateNodeId("end");
 
     nodes.push(
-        this.createSemanticNode(entryId, "Start", NodeType.ENTRY, implNode)
+      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, implNode)
     );
     
     let lastExitPoints: { id: string; label?: string }[] = [{ id: entryId }];
@@ -2208,5 +2218,21 @@ protected processBlock(
       return cleanedText;
     }
     return cleanedText.substring(0, maxLength - 3) + "...";
+  }
+
+  private getParametersText(
+    targetNode: Parser.SyntaxNode,
+    isClosure: boolean
+  ): string {
+    if (isClosure) {
+      const value = targetNode.childForFieldName("value");
+      const paramsNode =
+        value?.childForFieldName("parameters") ||
+        value?.childForFieldName("closure_parameters");
+      return paramsNode ? this.humanizeExpression(paramsNode.text) : "";
+    }
+
+    const paramsNode = targetNode.childForFieldName("parameters");
+    return paramsNode ? this.humanizeExpression(paramsNode.text) : "";
   }
 }

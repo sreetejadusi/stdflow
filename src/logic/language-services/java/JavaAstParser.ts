@@ -238,7 +238,17 @@ export class JavaAstParser extends AbstractParser {
 
     // Create semantic entry and exit nodes
     nodes.push(
-      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+      this.createSemanticNode(
+        entryId,
+        "Start",
+        NodeType.ENTRY,
+        targetNode,
+        undefined,
+        {
+          function_name: funcNameStr,
+          parameters: this.getParametersText(targetNode, isLambda),
+        }
+      )
     );
     nodes.push(
       this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
@@ -527,6 +537,29 @@ export class JavaAstParser extends AbstractParser {
               finallyContext
             );
           }
+          if (child?.type === "method_invocation") {
+            const nodeId = this.generateNodeId("call");
+            const templateData = this.buildTemplateData(
+              NodeType.FUNCTION_CALL,
+              child
+            );
+            const node: FlowchartNode = this.createSemanticNode(
+              nodeId,
+              "Invoke a function",
+              NodeType.FUNCTION_CALL,
+              child,
+              undefined,
+              templateData
+            );
+            this.locationMap.push({
+              start: child.startIndex,
+              end: child.endIndex,
+              nodeId,
+            });
+            return this.createProcessResult([node], [], nodeId, [
+              { id: nodeId },
+            ]);
+          }
           expressionNode = child ?? undefined;
         }
 
@@ -551,9 +584,11 @@ export class JavaAstParser extends AbstractParser {
           const nodes: FlowchartNode[] = [
             this.createSemanticNode(
               conditionId,
-              conditionNode.text,
+              "Check condition",
               NodeType.DECISION,
-              conditionNode
+              conditionNode,
+              undefined,
+              { condition: this.humanizeExpression(conditionNode.text) }
             ),
           ];
           const edges: FlowchartEdge[] = [];
@@ -568,9 +603,14 @@ export class JavaAstParser extends AbstractParser {
           nodes.push(
             this.createSemanticNode(
               consequenceId,
-              `${targetText} = ${this.escapeString(consequenceNode.text)}`,
+              "Set value",
               NodeType.ASSIGNMENT,
-              statement
+              statement,
+              undefined,
+              {
+                target: this.humanizeExpression(assignmentTargetNode.text),
+                value: this.humanizeExpression(consequenceNode.text),
+              }
             )
           );
           this.locationMap.push({
@@ -584,9 +624,14 @@ export class JavaAstParser extends AbstractParser {
           nodes.push(
             this.createSemanticNode(
               alternativeId,
-              `${targetText} = ${this.escapeString(alternativeNode.text)}`,
+              "Set value",
               NodeType.ASSIGNMENT,
-              statement
+              statement,
+              undefined,
+              {
+                target: this.humanizeExpression(assignmentTargetNode.text),
+                value: this.humanizeExpression(alternativeNode.text),
+              }
             )
           );
           this.locationMap.push({
@@ -709,9 +754,11 @@ export class JavaAstParser extends AbstractParser {
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         ifConditionId,
-        ifConditionNode.text,
+        "Check condition",
         NodeType.DECISION,
-        ifConditionNode
+        ifConditionNode,
+        undefined,
+        { condition: this.humanizeExpression(ifConditionNode.text) }
       ),
     ];
     this.locationMap.push({
@@ -792,18 +839,21 @@ export class JavaAstParser extends AbstractParser {
     const condition = forNode.childForFieldName("condition");
     const update = forNode.childForFieldName("update");
 
-    const headerText = `for (${init?.text || ""}; ${condition?.text || ""}; ${
-      update?.text || ""
-    })`;
     const headerId = this.generateNodeId("for_header");
     const loopExitId = this.generateNodeId("for_exit");
 
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         headerId,
-        headerText,
+        "Repeat",
         NodeType.LOOP_START,
-        forNode
+        forNode,
+        undefined,
+        {
+          condition: condition
+            ? this.humanizeExpression(condition.text)
+            : "each iteration",
+        }
       ),
       this.createSemanticNode(
         loopExitId,
@@ -931,16 +981,18 @@ export class JavaAstParser extends AbstractParser {
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
     const conditionNode = whileNode.childForFieldName("condition")!;
-    const conditionText = this.escapeString(conditionNode.text);
+    const conditionText = this.humanizeExpression(conditionNode.text);
     const conditionId = this.generateNodeId("while_cond");
     const loopExitId = this.generateNodeId("while_exit");
 
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         conditionId,
-        conditionText,
+        "Repeat",
         NodeType.LOOP_START,
-        conditionNode
+        conditionNode,
+        undefined,
+        { condition: conditionText }
       ),
       this.createSemanticNode(
         loopExitId,
@@ -998,16 +1050,18 @@ export class JavaAstParser extends AbstractParser {
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
     const conditionNode = doWhileNode.childForFieldName("condition");
-    const conditionText = this.escapeString(conditionNode?.text || "condition");
+    const conditionText = this.humanizeExpression(conditionNode?.text || "condition");
     const conditionId = this.generateNodeId("do_while_cond");
     const loopExitId = this.generateNodeId("do_while_exit");
 
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         conditionId,
-        conditionText,
-        NodeType.DECISION,
-        conditionNode!
+        "Repeat",
+        NodeType.LOOP_START,
+        conditionNode!,
+        undefined,
+        { condition: conditionText }
       ),
       this.createSemanticNode(
         loopExitId,
@@ -1068,9 +1122,11 @@ export class JavaAstParser extends AbstractParser {
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
         switchId,
-        `switch (${this.escapeString(discriminantNode.text)})`,
+        "Select matching case",
         NodeType.DECISION,
-        discriminantNode
+        discriminantNode,
+        undefined,
+        { condition: this.humanizeExpression(discriminantNode.text) }
       ),
     ];
     this.locationMap.push({
@@ -1523,15 +1579,21 @@ export class JavaAstParser extends AbstractParser {
 
       const nodeId = this.generateNodeId("var_decl");
       const type = declNode.childForFieldName("type")?.text || "var";
-      const labelText = `${type} ${name?.text || "variable"}${
-        value ? ` = ${this.escapeString(value.text)}` : ""
-      }`;
+      const varName = name?.text || "variable";
+      const labelText = value ? "Set value" : `Declare variable ${varName}`;
       const nodeType = value ? NodeType.ASSIGNMENT : NodeType.PROCESS;
       const node: FlowchartNode = this.createSemanticNode(
         nodeId,
         labelText,
         nodeType,
-        declNode
+        declNode,
+        undefined,
+        value
+          ? {
+              target: this.humanizeExpression(varName),
+              value: this.humanizeExpression(value.text),
+            }
+          : undefined
       );
       this.locationMap.push({
         start: declNode.startIndex,
@@ -1553,15 +1615,21 @@ export class JavaAstParser extends AbstractParser {
 
       const nodeId = this.generateNodeId("var_decl");
       const type = declNode.childForFieldName("type")?.text || "var";
-      const labelText = `${type} ${name?.text || "variable"}${
-        value ? ` = ${this.escapeString(value.text)}` : ""
-      }`;
+      const varName = name?.text || "variable";
+      const labelText = value ? "Set value" : `Declare variable ${varName}`;
       const nodeType = value ? NodeType.ASSIGNMENT : NodeType.PROCESS;
       const node: FlowchartNode = this.createSemanticNode(
         nodeId,
         labelText,
         nodeType,
-        declarator
+        declarator,
+        undefined,
+        value
+          ? {
+              target: this.humanizeExpression(varName),
+              value: this.humanizeExpression(value.text),
+            }
+          : undefined
       );
       nodes.push(node);
       this.locationMap.push({
@@ -1616,5 +1684,76 @@ export class JavaAstParser extends AbstractParser {
       [],
       new Set([nodeId])
     );
+  }
+
+  protected buildTemplateData(
+    nodeType: NodeType,
+    syntaxNode: Parser.SyntaxNode
+  ): Record<string, string> | undefined {
+    if (
+      (nodeType === NodeType.FUNCTION_CALL ||
+        nodeType === NodeType.METHOD_CALL) &&
+      syntaxNode.type === "method_invocation"
+    ) {
+      const nameNode =
+        syntaxNode.childForFieldName("name") ||
+        syntaxNode.childForFieldName("method");
+      const objectNode = syntaxNode.childForFieldName("object");
+      const argsNode = syntaxNode.childForFieldName("arguments");
+      const args = argsNode?.namedChildren || [];
+      const rawName = nameNode
+        ? this.humanizeExpression(nameNode.text)
+        : "function";
+      const objectName = objectNode
+        ? this.humanizeExpression(objectNode.text)
+        : "";
+      const combined = objectName ? `${objectName} ${rawName}` : rawName;
+      const friendlyName =
+        combined === "system out println" || combined === "system out print"
+          ? "output"
+          : combined;
+      const formattedArgs = args
+        .map((arg) => this.formatJavaArgument(arg))
+        .filter(Boolean)
+        .join(", ");
+      return {
+        function_name: friendlyName,
+        arguments: formattedArgs || "inputs",
+      };
+    }
+
+    return super.buildTemplateData(nodeType, syntaxNode);
+  }
+
+  private formatJavaArgument(arg: Parser.SyntaxNode): string {
+    if (arg.type === "string_literal") {
+      return this.cleanStringLiteral(arg.text);
+    }
+    return this.humanizeExpression(arg.text);
+  }
+
+  private cleanStringLiteral(text: string): string {
+    const trimmed = text.trim();
+    if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+      return trimmed.slice(1, -1);
+    }
+    return trimmed;
+  }
+
+  private getParametersText(
+    targetNode: Parser.SyntaxNode,
+    isLambda: boolean
+  ): string {
+    if (isLambda) {
+      const lambdaExpr = targetNode.childForFieldName("value");
+      const paramsNode =
+        lambdaExpr?.childForFieldName("parameters") ||
+        lambdaExpr?.childForFieldName("parameter");
+      return paramsNode ? this.humanizeExpression(paramsNode.text) : "";
+    }
+
+    const paramsNode = targetNode.childForFieldName("parameters");
+    return paramsNode ? this.humanizeExpression(paramsNode.text) : "";
   }
 }

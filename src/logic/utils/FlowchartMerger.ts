@@ -121,13 +121,17 @@ export function mergeFunctionFlowcharts(
     if (!node.nodeType || !CALL_NODE_TYPES.has(node.nodeType)) {
       continue;
     }
-    const target = extractCallTarget(node.label);
+    const target =
+      node.templateData?.function_name || extractCallTarget(node.label);
     if (!target) continue;
     const targetEntry = nameToEntry.get(target);
     if (!targetEntry) continue;
     const targetNode = nodeById.get(targetEntry);
-    const params = targetNode ? extractCallArguments(targetNode.label) : undefined;
-    const args = extractCallArguments(node.label);
+    const params =
+      targetNode?.templateData?.parameters ||
+      (targetNode ? extractCallArguments(targetNode.label) : undefined);
+    const args =
+      node.templateData?.arguments || extractCallArguments(node.label);
     let edgeLabel = "calls";
     if (args && params) {
       edgeLabel = `args: ${trimLabel(args, 50)} -> params: ${trimLabel(params, 50)}`;

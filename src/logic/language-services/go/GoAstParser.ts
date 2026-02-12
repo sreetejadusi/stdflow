@@ -86,7 +86,19 @@ export class GoAstParser extends AbstractParser {
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    nodes.push(this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode));
+    nodes.push(
+      this.createSemanticNode(
+        entryId,
+        "Start",
+        NodeType.ENTRY,
+        targetNode,
+        undefined,
+        {
+          function_name: funcNameStr,
+          parameters: this.getParametersText(targetNode),
+        }
+      )
+    );
     nodes.push(this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode));
     this.locationMap.push({ start: targetNode.startIndex, end: targetNode.endIndex, nodeId: entryId });
     this.locationMap.push({ start: targetNode.startIndex, end: targetNode.endIndex, nodeId: exitId });
@@ -168,6 +180,11 @@ export class GoAstParser extends AbstractParser {
     });
 
     return mergeFunctionFlowcharts(units, { title: "Flowchart for file" });
+  }
+
+  private getParametersText(targetNode: Parser.SyntaxNode): string {
+    const paramsNode = targetNode.childForFieldName("parameters");
+    return paramsNode ? this.humanizeExpression(paramsNode.text) : "";
   }
 
   private processStatementList(

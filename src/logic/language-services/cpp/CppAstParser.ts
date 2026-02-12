@@ -244,7 +244,17 @@ export class CppAstParser extends AbstractParser {
 
     // Create semantic entry and exit nodes
     nodes.push(
-      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+      this.createSemanticNode(
+        entryId,
+        "Start",
+        NodeType.ENTRY,
+        targetNode,
+        undefined,
+        {
+          function_name: funcNameStr,
+          parameters: this.getParametersText(declarator),
+        }
+      )
     );
     nodes.push(
       this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
@@ -581,6 +591,16 @@ export class CppAstParser extends AbstractParser {
     }
 
     return null;
+  }
+
+  private getParametersText(declarator?: Parser.SyntaxNode | null): string {
+    if (!declarator) return "";
+    const text = declarator.text || "";
+    const openIdx = text.indexOf("(");
+    const closeIdx = text.lastIndexOf(")");
+    if (openIdx < 0 || closeIdx <= openIdx) return "";
+    const inside = text.slice(openIdx + 1, closeIdx).trim();
+    return inside ? this.humanizeExpression(inside) : "";
   }
 
   private extractVariableName(
